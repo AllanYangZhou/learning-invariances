@@ -3,7 +3,7 @@ import numpy as np
 import math
 import argparse
 from augerino import datasets, models, losses
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from oil.utils.mytqdm import tqdm
 from smallnet import smallnet
 import pandas as pd
@@ -19,7 +19,9 @@ def main(args):
     softplus = torch.nn.Softplus()
     
     dataset = datasets.RotMNIST("~/datasets/", train=True)
-    trainloader = DataLoader(dataset, batch_size=args.batch_size)
+    trainset, valset = Subset(dataset, range(50000)), Subset(dataset, range(50000, 60000))
+    trainloader = DataLoader(trainset, batch_size=args.batch_size)
+    valloader = DataLoader(valset, batch_size=args.batch_size)
 
     optimizer = torch.optim.Adam([{'name': 'model', 'params': model.model.parameters(), "weight_decay": args.wd}, 
                                   {'name': 'aug', 'params': model.aug.parameters(), "weight_decay": 0.}], 
@@ -39,7 +41,8 @@ def main(args):
 
         epoch_loss = 0
         batches = 0
-        for i, data in enumerate(trainloader, 0):
+        trainbar = tqdm(trainloader, desc=f"Training epoch {epoch}")
+        for i, data in enumerate(trainbar, 0):
             # get the inputs; data is a list of [inputs, labels]
             inputs, labels = data
 
@@ -57,11 +60,26 @@ def main(args):
             optimizer.step()
             epoch_loss += loss.detach().item()
             batches += 1
-            print(epoch, loss.item(), softplus(model.aug.width).detach().data)
+            # print(epoch, loss.item(), softplus(model.aug.width).detach().data)
             log = model.aug.width.tolist()
             log += model.aug.width.grad.data.tolist()
             log += [loss.item()]
             logger.append(log)        
+            if not i % 10:
+                train_acc = (outputs.argmax(-1) == labels).float().mean().cpu().item()
+                trainbar.set_postfix(train_acc=train_acc)
+        with torch.no_grad():
+            model.eval()
+            val_accs = []
+            for i, data in enumerate(valloader):
+                inputs, labels = data
+                if use_cuda:
+                    inputs, labels = inputs.cuda(), labels.cuda()
+                outputs = model(inputs)
+                acc = (outputs.argmax(-1) == labels).float().mean().cpu().item()
+                val_accs.append(acc)
+            print(f"Epoch {epoch} val accuracy: {np.mean(val_accs)}")
+            model.train()
 
     fname = "/model" + str(args.aug_reg) + ".pt"
     torch.save(model.state_dict(), args.dir + fname)
