@@ -1,3 +1,4 @@
+from itertools import combinations_with_replacement
 import math
 import torch
 import torchvision.transforms as transforms
@@ -167,6 +168,50 @@ class RotMNIST(EasyIMGDataset,torchvision.datasets.MNIST):
             self.data = F.grid_sample(self.data, flowgrid)
     def __getitem__(self,idx):
         return (self.data[idx]-.5)/.25, int(self.targets[idx])
+
+    def default_aug_layers(self):
+        return RandomRotateTranslate(0)# no translation
+
+@export
+class LocalRotMNIST(torchvision.datasets.MNIST):
+    def __init__(self,*args, max_rotation=2*np.pi, **kwargs):
+        super().__init__(*args,download=True,**kwargs)
+        N = len(self.data)
+        angles = torch.rand(N)* 2 * max_rotation - max_rotation
+        self.resize_tfm = transforms.Resize((50, 25))
+        with torch.no_grad():
+            # Build affine matrices for random rotation of each image
+            affineMatrices = torch.zeros(N,2,3)
+            affineMatrices[:,0,0] = angles.cos()
+            affineMatrices[:,1,1] = angles.cos()
+            affineMatrices[:,0,1] = angles.sin()
+            affineMatrices[:,1,0] = -angles.sin()
+            self.data = self.data.unsqueeze(1).float()
+            flowgrid = F.affine_grid(affineMatrices, size = self.data.size())
+            self.data = self.resize_tfm(F.grid_sample(self.data, flowgrid))
+            idcs2 = np.arange(N)
+            np.random.shuffle(idcs2)
+            self.data = torch.cat((self.data, self.data[idcs2]), -1)
+        self.tgts2tgt = {}
+        tot = 0
+        for i,j in combinations_with_replacement(range(10), 2):
+            self.tgts2tgt[(i,j)] = tot
+            tot += 1
+        print(f"Number of targets: {len(self.tgts2tgt)}.")
+        combined_targets = []
+        for idx1, idx2 in enumerate(idcs2):
+            t1, t2 = sorted(self.targets[[idx1, idx2]].numpy().tolist())
+            combined_targets.append(self.tgts2tgt[(t1, t2)])
+        self.combined_targets = np.array(combined_targets)
+
+    def __getitem__(self, idx):
+        im = self.data[idx]
+        target = int(self.combined_targets[idx])
+        return (im - .5)/.25, target
+
+    def __len__(self):
+        return len(self.data)
+
     def default_aug_layers(self):
         return RandomRotateTranslate(0)# no translation
 

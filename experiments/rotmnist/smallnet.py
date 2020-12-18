@@ -33,9 +33,11 @@ class smallnet(nn.Module):
             nn.MaxPool2d(2),#MaxBlurPool(2*k),
             nn.Dropout2d(.3) if dropout else nn.Sequential(),
             ConvBNrelu(2*k,2*k),
+            nn.MaxPool2d(2),  # Inserted to allow fc layer.
             nn.Dropout2d(.3) if dropout else nn.Sequential(),
-            Expression(lambda u:u.mean(-1).mean(-1)),
-            nn.Linear(2*k,num_targets)
+            # Expression(lambda u:u.mean(-1).mean(-1)),
+            nn.Flatten(),
+            nn.Linear(2*k * 6 * 6,num_targets)
         )
     def forward(self,x):
         return self.net(x)

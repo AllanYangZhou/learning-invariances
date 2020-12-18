@@ -3,15 +3,15 @@ import numpy as np
 import math
 import argparse
 from augerino import datasets, models, losses
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset
 from oil.utils.mytqdm import tqdm
-from smallnet import smallnet
 import pandas as pd
-from tqdm import tqdm
+import torchsummary
+from smallnet import smallnet
 
 
 def main(args):
-    net = smallnet(in_channels=1,num_targets=10)
+    net = smallnet(in_channels=1,num_targets=55)
     if args.disable_aug:
         model = net
     else:
@@ -23,8 +23,8 @@ def main(args):
     
     softplus = torch.nn.Softplus()
     
-    dataset = datasets.RotMNIST("~/datasets/", train=True)
-    train_dset, val_dset = random_split(dataset, (50000, 10000))
+    dataset = datasets.LocalRotMNIST("~/datasets/", train=True)
+    train_dset, val_dset = Subset(dataset, range(50000)), Subset(dataset, range(50000, 60000))
     trainloader = DataLoader(train_dset, batch_size=args.batch_size)
     valloader = DataLoader(val_dset, batch_size=args.batch_size)
 
@@ -38,6 +38,7 @@ def main(args):
     if use_cuda:
         model = model.cuda()
         print("Using Cuda")
+    torchsummary.summary(model, (1, 50, 50))
 
     ## save init model ##
     fname = "/model" + str(args.aug_reg) + "_init.pt"
@@ -50,7 +51,8 @@ def main(args):
 
         epoch_loss = 0
         batches = 0
-        for i, data in enumerate(tqdm(trainloader), 0):
+        pbar = tqdm(trainloader, desc=f"Epoch {epoch} training")
+        for i, data in enumerate(pbar, 0):
             # get the inputs; data is a list of [inputs, labels]
             inputs, labels = data
 
@@ -74,9 +76,12 @@ def main(args):
                 log += model.aug.width.grad.data.tolist()
             log += [loss.item()]
             logger.append(log)        
+            if not i % 10:
+                train_acc = (outputs.argmax(-1) == labels).float().mean().cpu().item()
+                pbar.set_postfix(train_acc=train_acc)
         train_acc = (outputs.detach().argmax(-1) == labels).float().mean().cpu().item()
-        # print(f"Train epoch {epoch}: Loss {loss.item()}, Acc: {train_acc}, Aug widths: {softplus(model.aug.width).detach().data}")
-        print(f"Train epoch {epoch}: Loss {loss.item()}, Acc: {train_acc}.")
+        if not args.disable_aug:
+            print(f"Train epoch {epoch}: Loss {loss.item()}, Acc: {train_acc}, Aug widths: {softplus(model.aug.width).detach().data}")
         with torch.no_grad():
             model.eval()
             val_accs = []
@@ -117,7 +122,7 @@ if __name__ == '__main__':
     parser.add_argument(
         "--lr",
         type=float,
-        default=0.1,
+        default=0.1e-2,
         metavar="LR",
         help="initial learning rate (default: 0.1)",
     )
