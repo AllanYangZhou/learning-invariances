@@ -23,7 +23,7 @@ def main(args):
     
     softplus = torch.nn.Softplus()
     
-    dataset = datasets.LocalRotMNIST("~/datasets/", train=True)
+    dataset = datasets.LocalRotMNIST("~/datasets/", train=True, disable_rot=args.disable_rot)
     train_dset, val_dset = Subset(dataset, range(50000)), Subset(dataset, range(50000, 60000))
     trainloader = DataLoader(train_dset, batch_size=args.batch_size)
     valloader = DataLoader(val_dset, batch_size=args.batch_size)
@@ -155,7 +155,8 @@ if __name__ == '__main__':
         metavar="N",
         help="number of augmentations in network (defualt: 4)"
     )
-    parser.add_argument("--disable_aug", action="store_true")
+    parser.add_argument("--aug_type", type=str, default="input", choices=["input", "layers", "none"])
+    parser.add_argument("--disable_rot", action="store_true")
     args = parser.parse_args()
 
     main(args)

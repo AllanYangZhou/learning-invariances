@@ -174,7 +174,7 @@ class RotMNIST(EasyIMGDataset,torchvision.datasets.MNIST):
 
 @export
 class LocalRotMNIST(torchvision.datasets.MNIST):
-    def __init__(self,*args, max_rotation=2*np.pi, **kwargs):
+    def __init__(self,*args, max_rotation=2*np.pi, disable_rot=False, **kwargs):
         super().__init__(*args,download=True,**kwargs)
         N = len(self.data)
         angles = torch.rand(N)* 2 * max_rotation - max_rotation
@@ -188,7 +188,9 @@ class LocalRotMNIST(torchvision.datasets.MNIST):
             affineMatrices[:,1,0] = -angles.sin()
             self.data = self.data.unsqueeze(1).float()
             flowgrid = F.affine_grid(affineMatrices, size = self.data.size())
-            self.data = self.resize_tfm(F.grid_sample(self.data, flowgrid))
+            if not disable_rot:
+                self.data = F.grid_sample(self.data, flowgrid)
+            self.data = self.resize_tfm(self.data)
             idcs2 = np.arange(N)
             np.random.shuffle(idcs2)
             self.data = torch.cat((self.data, self.data[idcs2]), -1)
