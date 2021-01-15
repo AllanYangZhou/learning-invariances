@@ -7,19 +7,25 @@ from torch.utils.data import DataLoader, Subset
 from oil.utils.mytqdm import tqdm
 import pandas as pd
 import torchsummary
-from smallnet import smallnet
+from smallnet import smallnet, avgd_smallnet
 
 
 def main(args):
-    net = smallnet(in_channels=1,num_targets=55)
-    if args.disable_aug:
-        model = net
-    else:
+    if args.aug_type == "none":
+        model = smallnet(in_channels=1,num_targets=55)
+    elif args.aug_type == "input":
+        net = smallnet(in_channels=1,num_targets=55)
         augerino = models.UniformAug()
         model = models.AugAveragedModel(net, augerino,ncopies=args.ncopies)
         start_widths = torch.ones(6) * -5.
         start_widths[2] = 1.
         model.aug.set_width(start_widths)
+    else:
+        model = avgd_smallnet(in_channels=1, num_targets=55, ncopies=args.ncopies)
+        start_widths = torch.ones(6) * -5.
+        start_widths[2] = 1.
+        for aug in model.augs:
+            aug.set_width(start_widths)
     
     softplus = torch.nn.Softplus()
     
@@ -28,11 +34,21 @@ def main(args):
     trainloader = DataLoader(train_dset, batch_size=args.batch_size)
     valloader = DataLoader(val_dset, batch_size=args.batch_size)
 
-    if args.disable_aug:
+    if args.aug_type == "none":
         param_groups = model.parameters()
-    else:
+    elif args.aug_type == "input":
         param_groups = [{'name': 'model', 'params': model.model.parameters(), "weight_decay": args.wd}]
         param_groups.append({'name': 'aug', 'params': model.aug.parameters(), "weight_decay": 0.})
+    else:
+        model_params = []
+        aug_params = []
+        for name, param in model.named_parameters():
+            if "aug" in name.split("."):
+                aug_params.append(param)
+            else:
+                model_params.append(param)
+        param_groups = [{'name': 'model', 'params': model_params, "weight_decay": args.wd}]
+        param_groups.append({'name': 'aug', 'params': aug_params, "weight_decay": 0.})
     optimizer = torch.optim.Adam(param_groups, lr=args.lr)
     use_cuda = torch.cuda.is_available()
     if use_cuda:
@@ -44,7 +60,12 @@ def main(args):
     fname = "/model" + str(args.aug_reg) + "_init.pt"
     torch.save(model.state_dict(), args.dir + fname)
 
-    criterion = losses.no_aug_loss if args.disable_aug else losses.safe_unif_aug_loss
+    if args.aug_type == "none":
+        criterion = losses.no_aug_loss
+    elif args.aug_type == "input":
+        criterion = losses.safe_unif_aug_loss
+    else:
+        criterion = losses.safe_unif_multi_aug_loss
     torch.nn.CrossEntropyLoss()
     logger = []
     for epoch in range(args.epochs):  # loop over the dataset multiple times
@@ -71,7 +92,7 @@ def main(args):
             epoch_loss += loss.detach().item()
             batches += 1
             log = []
-            if not args.disable_aug:
+            if args.aug_type == "input":
                 log += model.aug.width.tolist()
                 log += model.aug.width.grad.data.tolist()
             log += [loss.item()]
@@ -80,8 +101,6 @@ def main(args):
                 train_acc = (outputs.argmax(-1) == labels).float().mean().cpu().item()
                 pbar.set_postfix(train_acc=train_acc)
         train_acc = (outputs.detach().argmax(-1) == labels).float().mean().cpu().item()
-        if not args.disable_aug:
-            print(f"Train epoch {epoch}: Loss {loss.item()}, Acc: {train_acc}, Aug widths: {softplus(model.aug.width).detach().data}")
         with torch.no_grad():
             model.eval()
             val_accs = []

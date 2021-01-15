@@ -33,6 +33,7 @@ class DiffAug(nn.Module):
     def __repr__(self):
         return self.__class__.__name__
 
+
 class AugAveragedModel(nn.Module):
     def __init__(self,model,aug,ncopies=4):
         super().__init__()
